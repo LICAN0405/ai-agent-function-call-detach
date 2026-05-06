@@ -1,117 +1,307 @@
-import { useState } from 'react';
+import { useState } from 'react'
 
-//换成 Kimi API Key
-const API_KEY = 'sk-rQMW19ExO0aBHG4z8BB2jfbjOrfb6REOyh2dRRugztbcSV3i';
+const API_KEY = 'sk-2rw01OQlkcia0R6gH7HHy0ogHA1MHEeCRpYZ5ICGtGVKh6gS'
 
 interface Message {
-  role: 'user' | 'assistant';
-  content: string;
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  content?: string
+  name?: string
+  tool_calls?: Array<{
+    id: string
+    type: string
+    function: {
+      name: string
+      arguments: string
+    }
+  }>
+  tool_call_id?: string
 }
 
-function App() {
-  // 聊天对话框信息
-  const [messages, setMessages] = useState<Message[]>([]);
-  // 输入框信息
-  const [input, setInput] = useState('');
-  // 加载状态
-  const [loading, setLoading] = useState(false);
-  // 点击发送键执行函数
-  const sendMessage = async () => {
-    // 记录下用户输入的信息
-    if (!input.trim() || loading) return;
-    const userMsg = input;
-    // 清空用户输入框内容
-    setInput('');
-    // 设置为加载中
-    setLoading(true);
-// 将用户输入的记录下到展示对话信息框
-    const newMessages: Message[] = [
-      ...messages,
-      { role: 'user', content: userMsg },
-    ];
-    setMessages(newMessages);
+const generateId = () => Math.random().toString(36).substr(2, 9)
 
-    try {
-      // 发送消息给gpt接口
-      const res = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',//告诉服务器发送的是json格式
-          Authorization: `Bearer ${API_KEY}`,//带上密钥
+const getCurrentTime = () => {
+  const now = new Date()
+  const weekArr = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return {
+    日期: now.toLocaleDateString(),
+    时间: now.toLocaleTimeString(),
+    星期: weekArr[now.getDay()],
+  }
+}
+
+const calcNum = (a: number, b: number, op: 'add' | 'sub') => {
+  if (op === 'add') return a + b
+  if (op === 'sub') return a - b
+  return 0
+}
+
+const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'getCurrentTime',
+      description: '获取当前系统的日期、具体时间和星期几',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calcNum',
+      description: '对两个数字做加法或者减法运算',
+      parameters: {
+        type: 'object',
+        properties: {
+          a: { type: 'number', description: '第一个数字' },
+          b: { type: 'number', description: '第二个数字' },
+          op: { type: 'string', enum: ['add', 'sub'], description: '运算类型：add加法，sub减法' },
         },
-        // 把消息对象变成 字符串 发给服务器
-        body: JSON.stringify({
-          model: 'moonshot-v1-8k',
-          messages: newMessages,//把聊天框所有信息（之前的聊天内容全部传给ai）
-          stream: true,//开启流式，让 AI 一字一字返回
-          temperature: 0.3,
-        }),
-      });
+        required: ['a', 'b', 'op'],
+      },
+    },
+  },
+]
 
-      const reader = res.body?.getReader();//1.给服务器返回的数据流创建一个读取器（getReader），帮你一段一段读 AI 返回的数据
-      //没拿到读取流工具就直接结束
-      if (!reader) {
-        setLoading(false);
-        return;
+function App() {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const executeTool = (toolName: string, toolArgs: any) => {
+    console.log(`[工具执行] 工具名: ${toolName}, 参数:`, toolArgs)
+    if (toolName === 'getCurrentTime') return getCurrentTime()
+    if (toolName === 'calcNum') return calcNum(toolArgs.a, toolArgs.b, toolArgs.op)
+    return { error: '未知工具' }
+  }
+
+  const callKimiAPI = async (currentMessages: Message[]) => {
+    console.log(`[API调用] 消息数量: ${currentMessages.length}`)
+
+    if (!API_KEY) {
+      throw new Error('API_KEY 为空，请设置有效的 API Key')
+    }
+
+    const apiMessages = currentMessages.map((msg) => {
+      const apiMsg: any = {
+        role: msg.role,
+        content: msg.content,
+        name: msg.name,
       }
 
-      const decoder = new TextDecoder('utf-8');//2.二进制转字符串工具
-      let buffer = '';//3.临时缓存区（流是一段一段来的，先存起来）
+      if (msg.tool_calls) {
+        apiMsg.tool_calls = msg.tool_calls
+      }
 
-      while (true) {
-        //读一段数据，返回done（是否读完），value（读到的二进制）
-        const { done, value } = await reader.read();//异步逐片读取二进制
-        // 读完则停止循环
-        if (done) break;
+      if (msg.tool_call_id) {
+        apiMsg.tool_call_id = msg.tool_call_id
+      }
 
-        // 把当前读到的这一段二进制流转化为字符串并拼接到临时缓存区
-        buffer += decoder.decode(value, { stream: true });//把数据拼成完整行：decoder.decode把二进制数据转化为字符串，{ stream: true } 表示：这是一段一段来的流
-        // 按换行符把数据切成数组，使得显示为一行一行的
-        const lines = buffer.split('\n');
-        //如果切完还有剩一段不完整的就把这个存到buffer中，等下一段流来再拼接上去，在执行 切成数组操作
-        buffer = lines.pop() || '';
+      return apiMsg
+    })
 
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;// 跳过空行、非数据行
+    const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'moonshot-v1-8k',
+        messages: apiMessages,
+        stream: false,
+        tools,
+        tool_choice: 'auto',
+      }),
+    })
 
-          const data = line.replace(/^data: /, '').trim();//把 data: 去掉 ； 去除首尾空格 ； 空行过滤
-          // 结束标志：AI 说完了
-          if (data === '[DONE]') {
-            setLoading(false);
-            continue;
-          }
+    console.log(`[API响应] 状态码: ${response.status}`)
 
-          try {
-            const json = JSON.parse(data);//把字符串转成 JSON 对象
-            const delta = json.choices?.[0]?.delta?.content;//取出 AI 新增的那几个字
-            if (delta) {
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === 'assistant') {
-                  return [
-                    ...prev.slice(0, -1),
-                    { ...last, content: last.content + delta },
-                  ];
-                } else {
-                  return [...prev, { role: 'assistant', content: delta }];
-                }
-              });
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`API错误 [${response.status}]: ${errorText}`)
+    }
+
+    const result = await response.json()
+    console.log(`[API响应] 完整响应:`, JSON.stringify(result))
+
+    return result
+  }
+
+  // 处理对话的函数
+  const processConversation = async (initialMessages: Message[]): Promise<Message[]> => {
+    console.log('[对话处理] 开始处理，初始消息数:', initialMessages.length)
+
+    let currentMessages = [...initialMessages]
+    let hasMore = true
+
+    while (hasMore) {
+      const response = await callKimiAPI(currentMessages)
+      const message = response.choices?.[0]?.message
+
+      if (!message) {
+        throw new Error('API 未返回消息')
+      }
+
+      console.log('[对话处理] API 返回消息:', JSON.stringify(message))
+
+      // 添加助手消息
+      const assistantMessage: Message = {
+        id: generateId(),
+        role: 'assistant',
+      }
+
+      if (message.content) {
+        assistantMessage.content = message.content
+      }
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        assistantMessage.tool_calls = message.tool_calls
+      }
+
+      currentMessages = [...currentMessages, assistantMessage]
+
+      // 如果有工具调用，执行工具
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        console.log('[对话处理] 检测到工具调用:', message.tool_calls)
+
+        const toolResultMessages: Message[] = []
+        for (const toolCall of message.tool_calls) {
+          if (toolCall.function && toolCall.function.name) {
+            let args: any = {}
+            try {
+              args =
+                typeof toolCall.function.arguments === 'string'
+                  ? JSON.parse(toolCall.function.arguments)
+                  : toolCall.function.arguments
+            } catch (e) {
+              console.error('[参数解析失败]', e)
             }
-          } catch (e) {
-            // 忽略解析错误（比如中间不完整的 chunk）
+            const result = executeTool(toolCall.function.name, args)
+
+            toolResultMessages.push({
+              id: generateId(),
+              role: 'tool',
+              name: toolCall.function.name,
+              content: JSON.stringify(result),
+              tool_call_id: toolCall.id,
+            })
           }
         }
+
+        currentMessages = [...currentMessages, ...toolResultMessages]
+        // 继续循环处理工具结果
+      } else {
+        // 没有工具调用，对话结束
+        hasMore = false
       }
-    } catch (error) {
-      console.error('请求出错：', error);
-      setLoading(false);
     }
-  };
+
+    return currentMessages
+  }
+
+  // 发送消息入口函数
+  // 关键修复：不使用 useCallback，避免闭包捕获旧状态
+  const sendMessage = async () => {
+    const userMsg = input.trim()
+    if (!userMsg) {
+      console.log('[发送] 输入为空')
+      return
+    }
+
+    if (loading) {
+      console.log('[发送] 正在加载中，忽略请求')
+      return
+    }
+
+    // 立即设置 loading 状态
+    setLoading(true)
+    setInput('')
+    setError(null)
+
+    // 创建用户消息
+    const userMessage: Message = {
+      id: generateId(),
+      role: 'user',
+      content: userMsg,
+    }
+
+    // 使用函数式更新添加用户消息，并获取最新状态用于处理
+    setMessages((prev) => {
+      const newMessages = [...prev, userMessage]
+
+      // 在函数式更新内部，prev 是最新的状态
+      // 立即启动对话处理
+      ;(async () => {
+        try {
+          // 使用 prev（最新状态）+ 用户消息作为初始消息
+          const currentMessages = [...prev, userMessage]
+          console.log('[发送] 当前消息数量:', currentMessages.length)
+
+          // 处理对话
+          const finalMessages = await processConversation(currentMessages)
+
+          // 更新最终消息列表
+          setMessages(finalMessages)
+          console.log('[发送] 对话处理完成，最终消息数:', finalMessages.length)
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : '未知错误'
+          console.error('[发送错误]', errorMsg)
+          setError(errorMsg)
+          setMessages((prev2) => [
+            ...prev2,
+            {
+              id: generateId(),
+              role: 'assistant',
+              content: '抱歉，请求出错：' + errorMsg,
+            },
+          ])
+        } finally {
+          setLoading(false)
+        }
+      })()
+
+      return newMessages
+    })
+  }
 
   return (
     <div style={{ maxWidth: 700, margin: '40px auto', padding: '0 20px' }}>
-      <h2>AI Agent 第1天：Kimi 流式对话</h2>
-      <h2>ai小助手</h2>
+      <h2>AI Agent 工具调用</h2>
+
+      {/* API Key 警告 */}
+      {!API_KEY && (
+        <div
+          style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffeeba',
+            borderRadius: 4,
+            padding: 12,
+            marginBottom: 16,
+            color: '#856404',
+          }}
+        >
+          ⚠️ 警告：API_KEY 为空，请设置有效的 Kimi API Key
+        </div>
+      )}
+
+      {/* 错误提示 */}
+      {error && (
+        <div
+          style={{
+            backgroundColor: '#f8d7da',
+            border: '1px solid #f5c6cb',
+            borderRadius: 4,
+            padding: 12,
+            marginBottom: 16,
+            color: '#721c24',
+          }}
+        >
+          ❌ 错误：{error}
+        </div>
+      )}
+
       <div
         style={{
           height: '400px',
@@ -121,55 +311,49 @@ function App() {
           overflowY: 'auto',
         }}
       >
-        {messages.map((m, i) => (
-          <div key={i} style={{ margin: '8px 0' }}>
-            <strong>{m.role === 'user' ? '你：' : 'AI：'}</strong>
-            <p style={{ margin: 0, display: 'inline' }}>{m.content}</p>
+        {messages.length === 0 ? (
+          <div style={{ color: '#999', textAlign: 'center', padding: '40px 0' }}>
+            开始对话吧！问我问题，我可以帮您获取当前时间或进行简单计算。
           </div>
-        ))}
-        {loading && <div>AI 思考中...</div>}
+        ) : (
+          messages.map((m) => (
+            <div key={m.id} style={{ margin: '8px 0' }}>
+              <strong>{m.role === 'user' ? '你：' : m.role === 'tool' ? '🛠 工具返回：' : 'AI：'}</strong>
+              <p style={{ margin: 0, display: 'inline' }}>
+                {m.tool_calls ? `调用工具: ${m.tool_calls.map((tc) => tc.function.name).join(', ')}` : m.content}
+              </p>
+            </div>
+          ))
+        )}
+        {loading && <div style={{ color: '#666', fontStyle: 'italic' }}>AI 思考中...</div>}
       </div>
       <div style={{ marginTop: 16, display: 'flex' }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          style={{ flex: 1, padding: '10px', fontSize: 16 }}
-          placeholder="输入问题..."
+          style={{ flex: 1, padding: '10px', fontSize: 16, border: '1px solid #ddd', borderRadius: 4 }}
+          placeholder="输入问题（如：现在几点了？）..."
           disabled={loading}
         />
         <button
           onClick={sendMessage}
-          style={{ padding: '0 20px', marginLeft: 8 }}
+          style={{
+            padding: '10px 20px',
+            marginLeft: 8,
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: 4,
+            cursor: loading ? 'not-allowed' : 'pointer',
+          }}
           disabled={loading}
         >
           发送
         </button>
       </div>
     </div>
-  );
+  )
 }
 
-export default App;
-
-// 整给项目的流程：用户在输入框中输入问题，点击发送就会执行sendMessage函数
-// 这个函数首先会记录用户问题，并清空输入框数据，显示加载ai回答并在消息框中添加用户当前聊天信息。然后调用接口上传问题
-// 利用读取器一段一段地读取服务端返回的数据流（二进制）并利用decoder.decode将其转化为字符串
-// 每段数据流会根据换行符进行切行为数组（剩余后面没换行符的就放进临时缓存区，等到下一段流来就把这个加到下一段流上）
-// 并把这个数组中数据流一个一个进行操作（比如说去掉每个前面的data）得到这行最终需要展示的数据。然后将这段数据拼接到消息框中。
-
-
-// 整个项目标准流程：
-// 用户输入问题，点击发送，触发 sendMessage
-// 保存用户消息，清空输入框，显示加载状态，并把用户消息渲染到页面
-// 向后端（Kimi）发送流式接口请求
-// 用 reader 循环读取二进制流
-// 用 TextDecoder 把二进制转字符串
-// 按换行符 \n 切割成行数组
-// 不完整的行存入 buffer，等待下一段流拼接
-// 逐行解析：去掉 data: 前缀 → 提取 delta 增量文字
-// 把每一段新文字追加到 AI 消息中
-// 直到流结束，关闭加载状态
-
-// SSE 
-
+export default App
