@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const API_KEY = 'sk-ds47YS6OfU00ADogfVXL4KC9KzmZSKgiUgwHhfIUihrN7NlH'
+const API_KEY = ''
 
 interface Message {
   id: string
@@ -81,7 +81,6 @@ const tools = [
           },
         },
         // required 表示这些参数必须提供。
-        // 如果用户说“3 加 5”，AI 应该整理出 { a: 3, b: 5, op: 'add' }。
         required: ['a', 'b', 'op'],
       },
     },
@@ -100,15 +99,13 @@ function App() {
 
   // executeTool 是工具执行入口。
   // AI 返回的只是“我要调用哪个工具、参数是什么”。
-  // 真正执行工具的是我们自己的代码。
   const executeTool = (toolName: string, toolArgs: any) => {
     if (toolName === 'getCurrentTime') return getCurrentTime()
     if (toolName === 'calcNum') return calcNum(toolArgs.a, toolArgs.b, toolArgs.op)
-    // 如果 AI 传了一个我们没有定义过的工具名，就返回错误。
     return { error: '未知工具' }
   }
 
-  // callKimiAPI 负责调用 Kimi 接口。
+  //负责调用 Kimi 接口。
   const callKimiAPI = async (currentMessages: Message[]) => {
     // 如果 API_KEY 为空，就主动抛出错误，避免继续请求。
     if (!API_KEY) {
@@ -118,6 +115,7 @@ function App() {
     // currentMessages 是前端内部使用的消息格式。
     // apiMessages 是发给 Kimi API 的消息格式。
     // 这里做一次转换，去掉前端不需要传给 API 的 id，并保留工具调用相关字段。
+    // 处理需要传递给接口的消息
     const apiMessages = currentMessages.map((msg) => {
       const apiMsg: any = {
         role: msg.role,
@@ -126,13 +124,11 @@ function App() {
       }
 
       // 如果 assistant 消息里包含 tool_calls，要传给 API。
-      // 这样 Kimi 才知道自己之前请求过哪些工具。
       if (msg.tool_calls) {
         apiMsg.tool_calls = msg.tool_calls
       }
 
       // 如果是 tool 消息，要带上 tool_call_id。
-      // 这样 Kimi 才知道这个工具结果对应哪次工具调用。
       if (msg.tool_call_id) {
         apiMsg.tool_call_id = msg.tool_call_id
       }
@@ -142,6 +138,7 @@ function App() {
 
     // fetch 是浏览器内置的网络请求函数。
     // await 表示等待请求完成后，再继续往下执行。
+    // 发起请求
     const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -153,13 +150,11 @@ function App() {
         Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify({
-        // 选择使用的 Kimi 模型。
         model: 'moonshot-v1-8k',
         // 把完整对话上下文传给模型。
         messages: apiMessages,
 
         // 这里关闭流式输出。
-        // false 表示等 AI 完整生成后，一次性返回结果。
         stream: false,
 
         // 把工具说明书传给模型。
@@ -170,9 +165,7 @@ function App() {
       }),
     })
 
-    console.log(`[API响应] 状态码: ${response.status}`)
-
-    // response.ok 为 false，说明 HTTP 请求失败，比如 401、429、500 等。
+    // response.ok 为 false，说明 HTTP 请求失败
     if (!response.ok) {
       const errorText = await response.text()
       throw new Error(`API错误 [${response.status}]: ${errorText}`)
@@ -180,32 +173,22 @@ function App() {
 
     // 把接口返回的 JSON 字符串解析成 JavaScript 对象。
     const result = await response.json()
-    console.log(`[API响应] 完整响应:`, JSON.stringify(result))
 
     return result
   }
 
-  // processConversation 是这个项目的核心函数。
-  //
   // 它完整处理一次“Agent 对话”：
   // 1. 把用户消息发给 Kimi。
   // 2. Kimi 可能直接回答，也可能要求调用工具。
   // 3. 如果 Kimi 要调用工具，前端执行对应工具。
   // 4. 把工具结果再发给 Kimi。
   // 5. Kimi 根据工具结果生成最终回答。
-  //
-  // 为什么要 while 循环？
-  // 因为模型可能不止一次调用工具。
-  // 只要它还返回 tool_calls，就继续执行工具并再次请求模型。
   const processConversation = async (initialMessages: Message[]): Promise<Message[]> => {
-    console.log('[对话处理] 开始处理，初始消息数:', initialMessages.length)
 
     // 复制一份消息列表，后续所有新增消息都放在 currentMessages 里。
-    // 使用复制可以避免直接修改原数组，这是 React 中很重要的习惯。
     let currentMessages = [...initialMessages]
 
     // hasMore 用来控制循环是否继续。
-    // true 表示还要继续请求模型，false 表示本轮对话结束。
     let hasMore = true
 
     while (hasMore) {
@@ -213,15 +196,12 @@ function App() {
       const response = await callKimiAPI(currentMessages)
 
       // 取出 Kimi 返回的第一条 assistant 消息。
-      // ?. 是可选链：如果中间某个字段不存在，不会直接报错，而是返回 undefined。
       const message = response.choices?.[0]?.message
 
       // 如果没有拿到消息，说明接口响应格式不符合预期。
       if (!message) {
         throw new Error('API 未返回消息')
       }
-
-      console.log('[对话处理] API 返回消息:', JSON.stringify(message))
 
       // 创建一条 assistant 消息。
       // 注意：assistant 消息可能有两种情况：
@@ -243,13 +223,10 @@ function App() {
       }
 
       // 把 assistant 消息加入当前对话上下文。
-      // 即使它只是“调用工具”的消息，也要保存下来。
       currentMessages = [...currentMessages, assistantMessage]
 
       // 如果 assistant 消息里包含 tool_calls，说明 AI 需要前端执行工具。
       if (message.tool_calls && message.tool_calls.length > 0) {
-        console.log('[对话处理] 检测到工具调用:', message.tool_calls)
-
         // 这个数组用来保存所有工具执行结果。
         // 一次 assistant 消息里可能包含多个工具调用。
         const toolResultMessages: Message[] = []
@@ -269,7 +246,6 @@ function App() {
                   ? JSON.parse(toolCall.function.arguments)
                   : toolCall.function.arguments
             } catch (e) {
-              // 如果 JSON 解析失败，不让程序直接崩溃，先打印错误。
               console.error('[参数解析失败]', e)
             }
 
@@ -277,7 +253,6 @@ function App() {
             const result = executeTool(toolCall.function.name, args)
 
             // 把工具执行结果包装成一条 role 为 tool 的消息。
-            // 这条消息后面会再发给 Kimi。
             toolResultMessages.push({
               id: generateId(),
               role: 'tool',
@@ -293,22 +268,17 @@ function App() {
         }
 
         // 把工具结果加入上下文。
-        // 接下来 while 会继续下一轮，把这些工具结果发给 Kimi。
         currentMessages = [...currentMessages, ...toolResultMessages]
       } else {
-        // 如果没有工具调用，说明 Kimi 已经给出了最终回答。
-        // 本轮对话可以结束。
+        // 如果没有工具调用，本轮对话结束。
         hasMore = false
       }
     }
 
-    // 返回包含用户消息、assistant 消息、tool 消息、最终回答的完整聊天记录。
     return currentMessages
   }
 
   // sendMessage 是发送消息的入口函数。
-  // 用户点击“发送”按钮，或者在输入框按 Enter，都会执行这个函数。
-  //
   // 这个函数负责：
   // 1. 读取用户输入。
   // 2. 校验输入是否为空、是否正在加载。
@@ -317,20 +287,14 @@ function App() {
   // 5. 成功后更新聊天记录，失败后显示错误。
   const sendMessage = async () => {
     // trim() 用来去掉字符串前后的空格。
-    // 比如 '  hello  ' 会变成 'hello'。
     const userMsg = input.trim()
 
     // 如果用户没有输入内容，就不发送。
-    if (!userMsg) {
-      console.log('[发送] 输入为空')
-      return
-    }
+    if (!userMsg) return
+
 
     // 如果当前正在请求 AI，就不允许重复发送。
-    if (loading) {
-      console.log('[发送] 正在加载中，忽略请求')
-      return
-    }
+    if (loading) return
 
     // 设置页面进入加载状态。
     setLoading(true)
@@ -350,7 +314,6 @@ function App() {
 
     // setMessages 可以接收一个函数。
     // 这个函数里的 prev 表示“更新前的最新 messages”。
-    // 使用函数式更新，可以减少拿到旧状态的风险。
     setMessages((prev) => {
       // 先把用户消息加到聊天列表里，让页面立刻显示用户刚输入的内容。
       const newMessages = [...prev, userMessage]
@@ -364,18 +327,14 @@ function App() {
           console.log('[发送] 当前消息数量:', currentMessages.length)
 
           // 处理完整对话。
-          // 这里内部可能发生：
           // 请求 Kimi -> 工具调用 -> 执行工具 -> 再请求 Kimi -> 最终回答。
           const finalMessages = await processConversation(currentMessages)
 
           // 用最终消息列表更新页面。
           setMessages(finalMessages)
-          console.log('[发送] 对话处理完成，最终消息数:', finalMessages.length)
         } catch (err) {
           // 如果请求、工具调用、JSON 解析等任何地方出错，都会进入 catch。
           const errorMsg = err instanceof Error ? err.message : '未知错误'
-          console.error('[发送错误]', errorMsg)
-
           // 把错误保存到 error 状态，用于页面顶部错误提示。
           setError(errorMsg)
 
@@ -389,8 +348,6 @@ function App() {
             },
           ])
         } finally {
-          // finally 无论成功还是失败都会执行。
-          // 请求结束后关闭 loading，让输入框和按钮恢复可用。
           setLoading(false)
         }
       })()
@@ -400,8 +357,6 @@ function App() {
     })
   }
 
-  // return 里面是 JSX，也就是页面结构。
-  // JSX 看起来像 HTML，但本质上是 JavaScript 语法的一部分。
   return (
     <div style={{ maxWidth: 700, margin: '40px auto', padding: '0 20px' }}>
       <h2>AI Agent 工具调用</h2>
@@ -469,7 +424,6 @@ function App() {
           ))
         )}
 
-        {/* loading 为 true 时，显示“AI 思考中”。 */}
         {loading && <div style={{ color: '#666', fontStyle: 'italic' }}>AI 思考中...</div>}
       </div>
 
