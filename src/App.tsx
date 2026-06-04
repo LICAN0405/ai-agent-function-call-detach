@@ -1,7 +1,5 @@
 import { useState } from 'react'
 
-const API_KEY = 'sk-gUtGFpows0HoF0LLCzotxG2ZgCKNl596jMiz1a7ZNudFfvTq'
-
 // 信息结构
 interface Message {
   id: string
@@ -29,7 +27,7 @@ interface Message {
 // 生成一个简单的随机 id。
 const generateId = () => Math.random().toString(36).substr(2, 9)
 
-// 这是第一个本地工具：获取当前时间。
+// 第一个本地工具：获取当前时间。
 const getCurrentTime = () => {
   const now = new Date()
   const weekArr = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -40,7 +38,7 @@ const getCurrentTime = () => {
   }
 }
 
-// 这是第二个本地工具：计算两个数字。
+// 第二个本地工具：计算两个数字。
 const calcNum = (a: number, b: number, op: 'add' | 'sub') => {
   if (op === 'add') return a + b
   if (op === 'sub') return a - b
@@ -232,10 +230,6 @@ function App() {
 
   //负责调用 Kimi 接口。
   const callKimiAPI = async (currentMessages: Message[]) => {
-    // 检查有没有 API Key。
-    if (!API_KEY) {
-      throw new Error('API_KEY 为空，请设置有效的 API Key')
-    }
 
     // 把前端内部消息格式转换成 API 需要的消息格式。
     const apiMessages = currentMessages.map((msg) => {
@@ -258,13 +252,11 @@ function App() {
     // fetch 是浏览器内置的网络请求函数。
     // await 表示等待请求完成后，再继续往下执行。
     // 发起请求
-    const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+    const response = await fetch('http://localhost:8080/api/chat', {
       method: 'POST',
       headers: {
         // 告诉服务器：请求体是 JSON 格式。
         'Content-Type': 'application/json',
-        // Authorization 用来携带 API Key。
-        Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify({
         model: 'moonshot-v1-8k',
@@ -455,22 +447,6 @@ function App() {
   return (
     <div style={{ maxWidth: 700, margin: '40px auto', padding: '0 20px' }}>
       <h2>AI Agent 工具调用</h2>
-
-      {/* 如果 API_KEY 为空，就显示黄色警告框。 */}
-      {!API_KEY && (
-        <div
-          style={{
-            backgroundColor: '#fff3cd',
-            border: '1px solid #ffeeba',
-            borderRadius: 4,
-            padding: 12,
-            marginBottom: 16,
-            color: '#856404',
-          }}
-        >
-          警告：API_KEY 为空，请设置有效的 Kimi API Key
-        </div>
-      )}
 
       {/* 如果 error 有值，就显示红色错误提示框。 */}
       {error && (
