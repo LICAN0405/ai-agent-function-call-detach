@@ -130,7 +130,7 @@ function App() {
 
   return (
     <div style={{ maxWidth: 700, margin: '40px auto', padding: '0 20px' }}>
-      <h2>AI Agent 工具调用</h2>
+      <h2>AI Agent 工具调用（前后分离）</h2>
 
       {error && (
         <div
