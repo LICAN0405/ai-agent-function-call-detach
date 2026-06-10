@@ -1,3 +1,4 @@
+import { Bubble, Sender } from '@ant-design/x'
 import { useState } from 'react'
 
 // 信息结构
@@ -128,6 +129,32 @@ function App() {
     })
   }
 
+  // 把 messages 转换成 Bubble 组件需要的格式。
+   const bubbleItems = messages.map((msg) => {
+    let content = msg.content || ''
+    let role: 'user' | 'ai' = msg.role === 'user' ? 'user' : 'ai'
+    
+    // 处理 tool_calls 的显示
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      const toolCallText = `🔧 调用工具: ${msg.tool_calls
+        .map((tc) => `${tc.function.name}(${tc.function.arguments})`)
+        .join(', ')}`
+      content = content ? `${toolCallText}\n\n${content}` : toolCallText
+    }
+    
+    // 处理 tool 角色的消息
+    if (msg.role === 'tool') {
+      role = 'ai'
+      content = `📦 工具返回: ${content || ''}`
+    }
+    
+    return {
+      key: msg.id,
+      role,
+      content,
+    }
+  })
+
   return (
     <div style={{ maxWidth: 700, margin: '40px auto', padding: '0 20px' }}>
       <h2>AI Agent 工具调用（前后分离）</h2>
@@ -162,65 +189,41 @@ function App() {
           <div style={{ color: '#999', textAlign: 'center', padding: '40px 0' }}>
             开始对话吧！问我问题，我可以帮您获取当前时间或进行简单计算。
           </div>
-        ) : (
-          // 如果有消息，就遍历 messages，把每条消息渲染到页面上。
-          messages.map((m) => (
-            <div key={m.id} style={{ margin: '8px 0' }}>
-              {/* 根据消息角色显示不同的前缀。 */}
-              <strong>{m.role === 'user' ? '你：' : m.role === 'tool' ? '工具返回：' : 'AI：'}</strong>
-
-              <p style={{ margin: 0, display: 'inline' }}>
-                {/* 如果这条 assistant 消息包含 tool_calls，就显示调用了哪些工具。 */}
-                {/* 否则就显示普通消息内容。 */}
-                {m.tool_calls
-                  ? `调用工具: ${m.tool_calls
-                      .map((tc) => `${tc.function.name}(${tc.function.arguments})`)
-                      .join(', ')}`
-                  : m.content}
-              </p>
-            </div>
-          ))
+        ) :(
+          <Bubble.List
+            items={bubbleItems}
+            role={{
+              user: {
+                placement: 'end',
+                variant: 'filled',
+                styles: {
+                  content: {
+                    background: '#e6f7ff',
+                  },
+                },
+              },
+              ai: {
+                placement: 'start',
+                variant: 'outlined',
+              },
+            }}
+          />
         )}
 
         {loading && <div style={{ color: '#666', fontStyle: 'italic' }}>AI 思考中...</div>}
       </div>
 
       {/* 底部输入区域。 */}
-      <div style={{ marginTop: 16, display: 'flex' }}>
-        <input
-          // value 绑定 input 状态，表示输入框内容由 React 状态控制。
+         <div style={{ marginTop: 16 }}>
+        <Sender
           value={input}
-
-          // 用户输入时，更新 input 状态。
-          onChange={(e) => setInput(e.target.value)}
-
-          // 用户按下 Enter 时发送消息。
-          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-
-          style={{ flex: 1, padding: '10px', fontSize: 16, border: '1px solid #ddd', borderRadius: 4 }}
-          placeholder="输入问题（如：现在几点了？）..."
-
-          // 加载中禁用输入框，避免用户重复提交。
+          onChange={setInput}
+          onSubmit={sendMessage}
+          loading={loading}
+          placeholder="输入问题（如：1+2+3等于多少？）..."
           disabled={loading}
+          style={{ borderRadius: 8 }}
         />
-
-        <button
-          // 点击按钮时发送消息。
-          onClick={sendMessage}
-          style={{
-            padding: '10px 20px',
-            marginLeft: 8,
-            backgroundColor: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: 4,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-          // 加载中禁用按钮。
-          disabled={loading}
-        >
-          发送
-        </button>
       </div>
     </div>
   )
